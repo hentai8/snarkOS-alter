@@ -46,7 +46,6 @@ where
     /// Prepares the node to perform specified network handshakes.
     async fn enable_handshake(&self) {
         let (from_node_sender, mut from_node_receiver) = mpsc::unbounded_channel::<ReturnableConnection>();
-
         // use a channel to know when the handshake task is ready
         let (tx, rx) = oneshot::channel();
 

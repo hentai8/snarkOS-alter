@@ -76,7 +76,7 @@ pub struct Router<N: Network> {
     /// The set of restricted peer IPs.
     restricted_peers: Arc<RwLock<IndexMap<SocketAddr, Instant>>>,
     /// The spawned handles.
-    handles: Arc<RwLock<Vec<JoinHandle<()>>>>,
+    pub handles: Arc<RwLock<Vec<JoinHandle<()>>>>,
     /// The boolean flag for the development mode.
     is_dev: bool,
 }

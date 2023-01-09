@@ -36,8 +36,8 @@ pub use reading::Reading;
 pub use writing::Writing;
 
 #[derive(Default)]
-pub(crate) struct Protocols {
-    pub(crate) handshake: OnceBox<ProtocolHandler<Connection, io::Result<Connection>>>,
+pub struct Protocols {
+    pub handshake: OnceBox<ProtocolHandler<Connection, io::Result<Connection>>>,
     pub(crate) reading: OnceBox<ProtocolHandler<Connection, io::Result<Connection>>>,
     pub(crate) writing: OnceBox<writing::WritingHandler>,
     pub(crate) disconnect: OnceBox<ProtocolHandler<SocketAddr, ()>>,
@@ -46,11 +46,11 @@ pub(crate) struct Protocols {
 /// An object sent to a protocol handler task; the task assumes control of a protocol-relevant item `T`,
 /// and when it's done with it, it returns it (possibly in a wrapper object) or another relevant object
 /// to the callsite via the counterpart [`oneshot::Receiver`].
-pub(crate) type ReturnableItem<T, U> = (T, oneshot::Sender<U>);
+pub type ReturnableItem<T, U> = (T, oneshot::Sender<U>);
 
-pub(crate) type ReturnableConnection = ReturnableItem<Connection, io::Result<Connection>>;
+pub type ReturnableConnection = ReturnableItem<Connection, io::Result<Connection>>;
 
-pub(crate) struct ProtocolHandler<T, U>(mpsc::UnboundedSender<ReturnableItem<T, U>>);
+pub struct ProtocolHandler<T, U>(pub mpsc::UnboundedSender<ReturnableItem<T, U>>);
 
 pub(crate) trait Protocol<T, U> {
     fn trigger(&self, item: ReturnableItem<T, U>);

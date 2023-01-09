@@ -84,7 +84,7 @@ pub struct InnerTcp {
     /// The node's listening address.
     listening_addr: Option<SocketAddr>,
     /// Contains objects used by the protocols implemented by the node.
-    pub(crate) protocols: Protocols,
+    pub protocols: Protocols,
     /// A list of connections that have not been finalized yet.
     connecting: Mutex<HashSet<SocketAddr>>,
     /// Contains objects related to the node's active connections.
@@ -94,7 +94,7 @@ pub struct InnerTcp {
     /// Collects statistics related to the node itself.
     stats: Stats,
     /// The node's tasks.
-    pub(crate) tasks: Mutex<Vec<JoinHandle<()>>>,
+    pub tasks: Mutex<Vec<JoinHandle<()>>>,
 }
 
 impl Tcp {

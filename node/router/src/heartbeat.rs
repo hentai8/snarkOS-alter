@@ -114,22 +114,22 @@ pub trait Heartbeat<N: Network>: Outbound<N> {
         // Retrieve the bootstrap peers.
         let bootstrap = self.router().bootstrap_peers();
 
-        // Find the oldest connected peer, that is neither trusted nor a bootstrap peer.
-        let oldest_peer = self
-            .router()
-            .get_connected_peers()
-            .iter()
-            .filter(|peer| !trusted.contains(&peer.ip()) && !bootstrap.contains(&peer.ip()))
-            .min_by_key(|peer| peer.last_seen())
-            .map(|peer| peer.ip());
+        // // Find the oldest connected peer, that is neither trusted nor a bootstrap peer.
+        // let oldest_peer = self
+        //     .router()
+        //     .get_connected_peers()
+        //     .iter()
+        //     .filter(|peer| !trusted.contains(&peer.ip()) && !bootstrap.contains(&peer.ip()))
+        //     .min_by_key(|peer| peer.last_seen())
+        //     .map(|peer| peer.ip());
 
-        // Disconnect from the oldest connected peer, if one exists.
-        if let Some(oldest) = oldest_peer {
-            info!("Disconnecting from '{oldest}' (periodic refresh of peers)");
-            let _ = self.send(oldest, Message::Disconnect(DisconnectReason::PeerRefresh.into()));
-            // Disconnect from this peer.
-            self.router().disconnect(oldest);
-        }
+        // // Disconnect from the oldest connected peer, if one exists.
+        // if let Some(oldest) = oldest_peer {
+        //     info!("Disconnecting from '{oldest}' (periodic refresh of peers)");
+        //     let _ = self.send(oldest, Message::Disconnect(DisconnectReason::PeerRefresh.into()));
+        //     // Disconnect from this peer.
+        //     self.router().disconnect(oldest);
+        // }
     }
 
     /// TODO (howardwu): If the node is a beacon, keep the beacons, and keep 0 clients and provers.

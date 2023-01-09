@@ -67,6 +67,7 @@ pub struct Prover<N: Network, C: ConsensusStorage<N>> {
 
 impl<N: Network, C: ConsensusStorage<N>> Prover<N, C> {
     /// Initializes a new prover node.
+    // 初始化，在这里启动
     pub async fn new(
         node_ip: SocketAddr,
         account: Account<N>,
@@ -184,6 +185,8 @@ impl<N: Network, C: ConsensusStorage<N>> Prover<N, C> {
                     info!("Found a Solution '{}' (Proof Target {solution_target})", solution.commitment());
                     // Broadcast the prover solution.
                     self.broadcast_prover_solution(solution);
+                } else {
+                    println!("真不会");
                 }
             } else {
                 // Otherwise, sleep for a brief period of time, to await for puzzle state.
@@ -197,6 +200,8 @@ impl<N: Network, C: ConsensusStorage<N>> Prover<N, C> {
             }
         }
     }
+
+
 
     /// Performs one iteration of the coinbase puzzle.
     fn coinbase_puzzle_iteration<R: Rng + CryptoRng>(

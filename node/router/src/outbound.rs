@@ -190,6 +190,8 @@ pub trait Outbound<N: Network>: Writing<Message = Message<N>> {
             .copied()
             .collect::<Vec<_>>();
 
+        println!("propagate_to_validators 中的 peers: {:#?}", peers);
+
         // Iterate through all beacons that are not the sender and excluded beacons.
         for peer_ip in peers {
             self.send(peer_ip, message.clone());
