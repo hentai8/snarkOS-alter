@@ -79,12 +79,14 @@ impl<N: Network, C: ConsensusStorage<N>> Prover<N, C> {
         let router = Router::new(
             node_ip,
             NodeType::Prover,
-            account,
+            account.clone(),
             trusted_peers,
             Self::MAXIMUM_NUMBER_OF_PEERS as u16,
             dev.is_some(),
         )
         .await?;
+
+        println!("account: {:#?}", account.clone());
         // Load the coinbase puzzle.
         let coinbase_puzzle = CoinbasePuzzle::<N>::load()?;
         // Compute the maximum number of puzzle instances.

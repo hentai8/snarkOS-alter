@@ -246,6 +246,7 @@ pub trait Heartbeat<N: Network>: Outbound<N> {
     fn handle_trusted_peers(&self) {
         // Ensure that the trusted nodes are connected.
         for peer_ip in self.router().trusted_peers() {
+            println!("正在处理Trusted_peers");
             // If the peer is not connected, attempt to connect to it.
             if !self.router().is_connected(peer_ip) {
                 // Attempt to connect to the trusted peer.

@@ -136,8 +136,8 @@ impl<N: Network> Router<N> {
                     router.insert_restricted_peer(peer_ip);
                 }
             }
-            // Remove the peer from the candidate peers.
-            router.remove_candidate_peer(peer_ip);
+            // // Remove the peer from the candidate peers.
+            // router.remove_candidate_peer(peer_ip);
         });
     }
 
