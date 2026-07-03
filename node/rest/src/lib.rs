@@ -229,6 +229,7 @@ impl<N: Network, C: ConsensusStorage<N>, R: Routing<N>> Rest<N, C, R> {
 
             // GET and POST ../solution/..
             .route("/solution/limits/{prover_address}", get(Self::get_solution_limits_for_prover))
+            .route("/solution/{solution_id}", get(Self::get_solution_metadata))
             .route("/solution/broadcast", post(Self::solution_broadcast))
 
             // GET ../find/..

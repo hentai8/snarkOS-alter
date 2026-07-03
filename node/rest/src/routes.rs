@@ -20,7 +20,10 @@ use snarkos_node_sync::BftSyncMode;
 #[cfg(feature = "history-staking-rewards")]
 use snarkvm::ledger::store::helpers::MapRead;
 use snarkvm::{
-    ledger::puzzle::Solution,
+    ledger::{
+        block::{Block, Ratify},
+        puzzle::{Solution, SolutionID},
+    },
     prelude::{
         Address,
         ConsensusVersion,
@@ -44,7 +47,7 @@ use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use serde_with::skip_serializing_none;
-use std::{collections::HashMap, fs, str::FromStr};
+use std::{collections::HashMap, fs, ops::Deref, str::FromStr};
 
 #[cfg(not(feature = "serial"))]
 use rayon::prelude::*;
@@ -194,6 +197,36 @@ pub(crate) struct TransactionWithMetadata<T: Serialize, N: Network> {
     block_height: Option<u32>,
 }
 
+/// The return value for a solution metadata query.
+#[derive(Clone, Serialize, PartialEq, Eq, Debug)]
+pub(crate) struct SolutionMetadata {
+    /// `true` if the solution is not confirmed in a block (not found, pending in the mempool, or aborted).
+    orphaned: bool,
+    /// The block height that contains the solution. Zero if the solution is not known to the ledger.
+    height: u32,
+    /// The block hash that contains the solution. Empty if the solution is not known to the ledger.
+    block_hash: String,
+    /// The puzzle reward for the solution in microcredits. Zero if the solution is orphaned.
+    reward: u64,
+}
+
+impl SolutionMetadata {
+    /// Returns the metadata for a solution that is not confirmed in the ledger.
+    const fn orphaned() -> Self {
+        Self { orphaned: true, height: 0, block_hash: String::new(), reward: 0 }
+    }
+
+    /// Returns the metadata for a solution that was aborted in a block.
+    fn aborted(height: u32, block_hash: impl ToString) -> Self {
+        Self { orphaned: true, height, block_hash: block_hash.to_string(), reward: 0 }
+    }
+
+    /// Returns the metadata for a confirmed solution in a block.
+    fn confirmed(height: u32, block_hash: impl ToString, reward: u64) -> Self {
+        Self { orphaned: false, height, block_hash: block_hash.to_string(), reward }
+    }
+}
+
 /// The return value for a `sync_status` query.
 #[skip_serializing_none]
 #[derive(Copy, Clone, Serialize)]
@@ -216,6 +249,53 @@ struct SyncStatus<'a> {
     outstanding_block_requests: usize,
     /// The current sync speed in blocks per second.
     sync_speed_bps: f64,
+}
+
+/// Computes the puzzle reward for a confirmed solution in a block.
+fn compute_solution_reward<N: Network, C: ConsensusStorage<N>>(
+    ledger: &Ledger<N, C>,
+    block: &Block<N>,
+    solution: &Solution<N>,
+) -> Result<u64> {
+    // Retrieve the total puzzle reward for the block.
+    let puzzle_reward = block
+        .ratifications()
+        .iter()
+        .find_map(|ratify| match ratify {
+            Ratify::PuzzleReward(reward) => Some(*reward),
+            _ => None,
+        })
+        .unwrap_or(0);
+
+    if puzzle_reward == 0 {
+        return Ok(0);
+    }
+
+    // Retrieve the accepted solutions in the block.
+    let Some(solutions) = block.solutions().deref().as_ref() else {
+        return Ok(0);
+    };
+
+    // Compute the combined proof target for all accepted solutions in the block.
+    let puzzle = ledger.puzzle();
+    let mut combined_proof_target = 0u128;
+    let mut solution_proof_target = 0u64;
+
+    for (_, candidate) in solutions.iter() {
+        let proof_target = puzzle.get_proof_target(candidate)?;
+        combined_proof_target = combined_proof_target.saturating_add(proof_target as u128);
+        if candidate.id() == solution.id() {
+            solution_proof_target = proof_target;
+        }
+    }
+
+    if combined_proof_target == 0 || solution_proof_target == 0 {
+        return Ok(0);
+    }
+
+    // Compute the prover reward: `puzzle_reward * (proof_target / combined_proof_target)`.
+    let numerator = (puzzle_reward as u128).saturating_mul(solution_proof_target as u128);
+    Ok(u64::try_from(numerator / combined_proof_target.max(1)).unwrap_or(0))
 }
 
 impl<N: Network, C: ConsensusStorage<N>, R: Routing<N>> Rest<N, C, R> {
@@ -1173,6 +1253,64 @@ impl<N: Network, C: ConsensusStorage<N>, R: Routing<N>> Rest<N, C, R> {
         Ok(ret)
     }
 
+    /// GET /<network>/solution/{solutionID}
+    pub(crate) async fn get_solution_metadata(
+        State(rest): State<Self>,
+        Path(solution_id): Path<String>,
+    ) -> Result<ErasedJson, RestError> {
+        // Return the orphaned metadata for invalid solution IDs.
+        let solution_id = match solution_id.parse::<SolutionID<N>>() {
+            Ok(solution_id) => solution_id,
+            Err(_) => return Ok(ErasedJson::pretty(SolutionMetadata::orphaned())),
+        };
+
+        let metadata = match tokio::task::spawn_blocking(move || rest.lookup_solution_metadata(solution_id)).await {
+            Ok(Ok(metadata)) => metadata,
+            Ok(Err(err)) => return Err(RestError::internal_server_error(err.context("Failed to lookup solution"))),
+            Err(err) => return Err(RestError::internal_server_error(anyhow!("Tokio error: {err}"))),
+        };
+
+        Ok(ErasedJson::pretty(metadata))
+    }
+
+    /// Looks up metadata for the given solution ID.
+    fn lookup_solution_metadata(&self, solution_id: SolutionID<N>) -> Result<SolutionMetadata> {
+        // Check if the solution is confirmed or aborted in the ledger.
+        if let Some(height) = self.ledger.find_block_height_from_solution_id(&solution_id)? {
+            let block_hash = self.ledger.get_hash(height)?;
+            let block = self.ledger.get_block(height)?;
+
+            // If the solution was aborted in the block, it is orphaned and earns no reward.
+            if block.aborted_solution_ids().contains(&solution_id) {
+                return Ok(SolutionMetadata::aborted(height, block_hash));
+            }
+
+            // If the solution is confirmed in the block, compute its puzzle reward.
+            let Some(solution) = block.get_solution(&solution_id) else {
+                return Err(anyhow!(
+                    "Solution '{solution_id}' is referenced at height {height}, but is missing from the block"
+                ));
+            };
+            let reward = compute_solution_reward(&self.ledger, &block, solution)?;
+            return Ok(SolutionMetadata::confirmed(height, block_hash, reward));
+        }
+
+        // If the solution is pending in the memory pool, it is not yet confirmed.
+        if self.is_solution_in_memory_pool(solution_id) {
+            return Ok(SolutionMetadata::orphaned());
+        }
+
+        // The solution is not known to this node.
+        Ok(SolutionMetadata::orphaned())
+    }
+
+    /// Returns `true` if the given solution ID is in the memory pool.
+    fn is_solution_in_memory_pool(&self, solution_id: SolutionID<N>) -> bool {
+        self.consensus
+            .as_ref()
+            .is_some_and(|consensus| consensus.unconfirmed_solutions().any(|(id, _)| id == solution_id))
+    }
+
     /// GET /<network>/solution/limits/{prover_address}
     pub(crate) async fn get_solution_limits_for_prover(
         State(rest): State<Self>,
@@ -1626,5 +1764,62 @@ mod route_error_tests {
         let err = map_missing_resource_error(anyhow::anyhow!(message));
         assert_eq!(err, StatusCode::INTERNAL_SERVER_ERROR);
         assert_eq!(err.to_string(), message);
+    }
+}
+
+#[cfg(test)]
+mod solution_metadata_tests {
+    use super::*;
+
+    #[test]
+    fn solution_metadata_orphaned_serializes_expected_fields() {
+        let metadata = SolutionMetadata::orphaned();
+        let json = serde_json::to_value(metadata).unwrap();
+
+        assert_eq!(json["orphaned"], true);
+        assert_eq!(json["height"], 0);
+        assert_eq!(json["block_hash"], "");
+        assert_eq!(json["reward"], 0);
+    }
+
+    #[test]
+    fn solution_metadata_aborted_includes_block_metadata() {
+        let metadata = SolutionMetadata {
+            orphaned: true,
+            height: 123,
+            block_hash: "ab1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqtest".to_string(),
+            reward: 0,
+        };
+        let json = serde_json::to_value(metadata).unwrap();
+
+        assert_eq!(json["orphaned"], true);
+        assert_eq!(json["height"], 123);
+        assert!(!json["block_hash"].as_str().unwrap().is_empty());
+        assert_eq!(json["reward"], 0);
+    }
+
+    #[test]
+    fn solution_metadata_confirmed_includes_reward() {
+        let metadata = SolutionMetadata {
+            orphaned: false,
+            height: 456,
+            block_hash: "ab1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqtest".to_string(),
+            reward: 1_000_000,
+        };
+        let json = serde_json::to_value(metadata).unwrap();
+
+        assert_eq!(json["orphaned"], false);
+        assert_eq!(json["height"], 456);
+        assert_eq!(json["reward"], 1_000_000);
+    }
+
+    #[test]
+    fn invalid_solution_id_parses_as_orphaned_metadata() {
+        let metadata = "solution1y0rxs05nt3qmqa4xarx"
+            .parse::<snarkvm::ledger::puzzle::SolutionID<snarkvm::prelude::MainnetV0>>()
+            .map(|_| SolutionMetadata::confirmed(1, "ab1test", 1))
+            .unwrap_or_else(|_| SolutionMetadata::orphaned());
+
+        assert_eq!(metadata, SolutionMetadata::orphaned());
     }
 }
