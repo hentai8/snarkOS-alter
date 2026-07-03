@@ -47,8 +47,8 @@ version = "1.0.4"
 default-features = false
 
 [workspace.dependencies.snarkvm]
-#path = "../snarkVM"
-version = "=4.13.1"
+path = "../snarkVM"
+#version = "=4.13.1"
 default-features = false
 
 [workspace.dependencies.anyhow]
