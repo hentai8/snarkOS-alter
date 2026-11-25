@@ -1557,7 +1557,7 @@ impl<N: Network, C: ConsensusStorage<N>, R: Routing<N>> Rest<N, C, R> {
         // Return the orphaned metadata for invalid solution IDs.
         let solution_id = match solution_id.parse::<SolutionID<N>>() {
             Ok(solution_id) => solution_id,
-            Err(_) => return Ok(ErasedJson::pretty(SolutionMetadata::orphaned())),
+            Err(_) => return Ok(ErasedJson::new(SolutionMetadata::orphaned())),
         };
 
         let metadata = match tokio::task::spawn_blocking(move || rest.lookup_solution_metadata(solution_id)).await {
@@ -1566,7 +1566,7 @@ impl<N: Network, C: ConsensusStorage<N>, R: Routing<N>> Rest<N, C, R> {
             Err(err) => return Err(RestError::internal_server_error(anyhow!("Tokio error: {err}"))),
         };
 
-        Ok(ErasedJson::pretty(metadata))
+        Ok(ErasedJson::new(metadata))
     }
 
     /// Looks up metadata for the given solution ID.
